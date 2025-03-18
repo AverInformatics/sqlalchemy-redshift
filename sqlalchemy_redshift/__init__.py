@@ -1,12 +1,3 @@
-# from pkg_resources import DistributionNotFound, get_distribution, parse_version
-
-# for package in ['psycopg2', 'psycopg2-binary', 'psycopg2cffi']:
-#     try:
-#         if get_distribution(package).parsed_version < parse_version('2.5'):
-#             raise ImportError('Minimum required version for psycopg2 is 2.5')
-#         break
-#     except DistributionNotFound:
-#         pass
 
 from importlib.metadata import distribution, PackageNotFoundError, version
 from packaging.version import parse
