@@ -1212,7 +1212,7 @@ class Psycopg2RedshiftDialectMixin(RedshiftDialectMixin):
         """
         default_args = {
             'sslmode': 'verify-full',
-            'sslrootcert': importlib.resources.files(__name__).joinpath('redshift-ca-bundle.crt'),
+            'sslrootcert': importlib.resources.files('sqlalchemy_redshift').joinpath('redshift-ca-bundle.crt'),
         }
         cargs, cparams = (
             super(Psycopg2RedshiftDialectMixin, self).create_connect_args(
