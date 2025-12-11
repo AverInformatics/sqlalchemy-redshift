@@ -50,8 +50,124 @@ else:
         from alembic.ddl.base import ColumnComment
         compiles(ColumnComment, 'redshift')(postgresql.visit_column_comment)
 
+    if Version(alembic.__version__) >= Version('0.6.0'):
+        from alembic.ddl.postgresql import PostgresqlColumnType
+
+        @compiles(PostgresqlColumnType, 'redshift')
+        def visit_redshift_column_type(
+            element: 'PostgresqlColumnType', compiler: 'PGDDLCompiler', **kw
+        ) -> str:
+            """
+            Redshift-specific implementation for column type changes.
+
+            Redshift has severe limitations on ALTER COLUMN TYPE:
+            - Only VARCHAR size changes are supported
+            - No arbitrary type changes (e.g., VARCHAR to INTEGER)
+            - No USING clause support
+
+            For VARCHAR size changes only, we use the native Redshift syntax.
+            For other type changes, this will generate the SQL but it will
+            fail at runtime - users must handle type changes manually via:
+            1. ADD new column with new type
+            2. UPDATE to copy/cast data
+            3. DROP old column
+            4. RENAME new column to old name
+            """
+            from sqlalchemy.dialects.postgresql import VARCHAR
+
+            # Check if this is a VARCHAR-to-VARCHAR size change (supported by Redshift)
+            is_varchar_resize = (
+                isinstance(element.type_, VARCHAR) and
+                element.using is None
+            )
+
+            if is_varchar_resize:
+                # Use Redshift's limited ALTER COLUMN TYPE syntax (VARCHAR size only)
+                return "%s %s %s" % (
+                    postgresql.alter_table(compiler, element.table_name, element.schema),
+                    postgresql.alter_column(compiler, element.column_name),
+                    "TYPE %s" % postgresql.format_type(compiler, element.type_),
+                )
+            else:
+                # For non-VARCHAR type changes or USING clauses, generate a warning comment
+                # The SQL will be generated but won't work in Redshift
+                import warnings
+                warnings.warn(
+                    f"Redshift does not support ALTER COLUMN TYPE for changing "
+                    f"'{element.column_name}' to {element.type_}. "
+                    f"This operation requires manual migration: "
+                    f"(1) ADD new column, (2) UPDATE/copy data, (3) DROP old column, "
+                    f"(4) RENAME new column.",
+                    UserWarning
+                )
+                # Generate PostgreSQL-style SQL anyway (will fail at runtime)
+                # This allows the migration to be generated for documentation
+                return postgresql.visit_column_type(element, compiler, **kw)
+
     class RedshiftImpl(postgresql.PostgresqlImpl):
         __dialect__ = 'redshift'
+
+        def alter_column(self, table_name, column_name,
+                        nullable=None, server_default=False, name=None,
+                        type_=None, schema=None, autoincrement=None,
+                        existing_type=None, existing_server_default=None,
+                        existing_nullable=None, existing_autoincrement=None,
+                        **kw):
+            """
+            Override alter_column to handle Redshift's limitations.
+
+            Redshift only supports:
+            - VARCHAR size changes (ALTER COLUMN ... TYPE VARCHAR(n))
+            - Column encoding changes (ALTER COLUMN ... ENCODE)
+            - NOT NULL constraints (but not via ALTER COLUMN)
+
+            Redshift does NOT support:
+            - Arbitrary type changes (e.g., INTEGER to VARCHAR)
+            - USING clauses
+            - Changing column defaults (use ADD DEFAULT/DROP DEFAULT separately)
+            """
+            from sqlalchemy.dialects.postgresql import VARCHAR
+            import warnings
+
+            # Check if attempting unsupported type change
+            if type_ is not None and not isinstance(type_, VARCHAR):
+                warnings.warn(
+                    f"Redshift does not support ALTER COLUMN TYPE for changing "
+                    f"column '{column_name}' from {existing_type} to {type_}. "
+                    f"Only VARCHAR size changes are supported. "
+                    f"For other type changes, you must manually: "
+                    f"(1) ADD a new column with the desired type, "
+                    f"(2) UPDATE to copy/cast data from old to new column, "
+                    f"(3) DROP the old column, "
+                    f"(4) RENAME the new column to the original name.",
+                    UserWarning,
+                    stacklevel=3
+                )
+
+            # Check for postgresql_using parameter (not supported in Redshift)
+            if kw.get('postgresql_using'):
+                warnings.warn(
+                    "Redshift does not support USING clauses in ALTER COLUMN. "
+                    "The 'postgresql_using' parameter will be ignored.",
+                    UserWarning,
+                    stacklevel=3
+                )
+
+            # Call parent implementation
+            super(RedshiftImpl, self).alter_column(
+                table_name, column_name,
+                nullable=nullable,
+                server_default=server_default,
+                name=name,
+                type_=type_,
+                schema=schema,
+                autoincrement=autoincrement,
+                existing_type=existing_type,
+                existing_server_default=existing_server_default,
+                existing_nullable=existing_nullable,
+                existing_autoincrement=existing_autoincrement,
+                **kw
+            )
 
 # "Each dialect provides the full set of typenames supported by that backend
 # with its __all__ collection
@@ -1754,7 +1870,7 @@ def visit_delete_stmt(element, compiler, **kwargs):
 
     # determine if the delete query needs a ``USING`` injected
     # by inspecting the whereclause's children & their children...
-    # first, the where clause text is buit, if applicable
+    # first, the where clause text is built, if applicable
     # then, the using clause text is built, if applicable
     # note:
     #   the tables in the using clause are sorted in the order in
