@@ -64,7 +64,7 @@ Not Supported:
 
 .. code-block:: python
 
-    # This will generate a warning and fail at runtime
+    # This will raise alembic.util.CommandError immediately
     op.alter_column('users', 'age',
                    type_=sa.Integer(),
                    existing_type=sa.VARCHAR(10))
@@ -73,7 +73,7 @@ Not Supported:
 
 .. code-block:: python
 
-    # This will generate a warning - USING is not supported in Redshift
+    # This will raise alembic.util.CommandError - USING is not supported in Redshift
     op.alter_column('users', 'age',
                    type_=sa.Integer(),
                    existing_type=sa.VARCHAR(10),
@@ -81,9 +81,9 @@ Not Supported:
 
 When you attempt unsupported operations, the dialect will:
 
-1. Generate a Python warning with instructions for manual migration
-2. Still generate the SQL (which will fail at runtime)
-3. Allow the migration file to be created for documentation purposes
+1. **Raise a CommandError immediately** with detailed migration instructions
+2. **Prevent invalid migrations from being generated**
+3. **Provide working example code** for the manual migration approach
 
 Manual Type Change Workaround
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

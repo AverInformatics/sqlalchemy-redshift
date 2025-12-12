@@ -89,20 +89,33 @@ else:
                     "TYPE %s" % postgresql.format_type(compiler, element.type_),
                 )
             else:
-                # For non-VARCHAR type changes or USING clauses, generate a warning comment
-                # The SQL will be generated but won't work in Redshift
-                import warnings
-                warnings.warn(
+                # For non-VARCHAR type changes or USING clauses, raise an exception
+                from sqlalchemy.exc import CompileError
+
+                error_msg = (
                     f"Redshift does not support ALTER COLUMN TYPE for changing "
-                    f"'{element.column_name}' to {element.type_}. "
-                    f"This operation requires manual migration: "
-                    f"(1) ADD new column, (2) UPDATE/copy data, (3) DROP old column, "
-                    f"(4) RENAME new column.",
-                    UserWarning
+                    f"column '{element.column_name}' to {element.type_}."
                 )
-                # Generate PostgreSQL-style SQL anyway (will fail at runtime)
-                # This allows the migration to be generated for documentation
-                return postgresql.visit_column_type(element, compiler, **kw)
+
+                if element.using:
+                    error_msg += "\nRedshift does not support USING clauses in ALTER COLUMN."
+
+                error_msg += (
+                    "\n\nOnly VARCHAR size changes are supported via ALTER COLUMN TYPE."
+                    "\n\nTo change column types in Redshift, you must manually perform a multi-step migration:"
+                    "\n  1. ADD a new column with the desired type"
+                    "\n  2. UPDATE to copy/cast data from old column to new column"
+                    "\n  3. DROP the old column"
+                    "\n  4. RENAME the new column to the original name"
+                    "\n\nExample migration:"
+                    f"\n  op.add_column('{element.table_name}', sa.Column('{element.column_name}_new', {element.type_!r}))"
+                    f"\n  op.execute('UPDATE {element.table_name} SET {element.column_name}_new = {element.column_name}::{element.type_}')"
+                    f"\n  op.drop_column('{element.table_name}', '{element.column_name}')"
+                    f"\n  op.alter_column('{element.table_name}', '{element.column_name}_new', new_column_name='{element.column_name}')"
+                    "\n\nFor more information, see: https://docs.aws.amazon.com/redshift/latest/dg/r_ALTER_TABLE.html"
+                )
+
+                raise CompileError(error_msg)
 
     class RedshiftImpl(postgresql.PostgresqlImpl):
         __dialect__ = 'redshift'
@@ -127,31 +140,35 @@ else:
             - Changing column defaults (use ADD DEFAULT/DROP DEFAULT separately)
             """
             from sqlalchemy.dialects.postgresql import VARCHAR
-            import warnings
+            from alembic.util import CommandError
 
             # Check if attempting unsupported type change
             if type_ is not None and not isinstance(type_, VARCHAR):
-                warnings.warn(
+                error_msg = (
                     f"Redshift does not support ALTER COLUMN TYPE for changing "
                     f"column '{column_name}' from {existing_type} to {type_}. "
-                    f"Only VARCHAR size changes are supported. "
-                    f"For other type changes, you must manually: "
-                    f"(1) ADD a new column with the desired type, "
-                    f"(2) UPDATE to copy/cast data from old to new column, "
-                    f"(3) DROP the old column, "
-                    f"(4) RENAME the new column to the original name.",
-                    UserWarning,
-                    stacklevel=3
+                    f"Only VARCHAR size changes are supported."
+                    f"\n\nTo change column types in Redshift, you must manually perform a multi-step migration:"
+                    f"\n  1. ADD a new column with the desired type"
+                    f"\n  2. UPDATE to copy/cast data from old to new column"
+                    f"\n  3. DROP the old column"
+                    f"\n  4. RENAME the new column to the original name"
+                    f"\n\nExample:"
+                    f"\n  op.add_column('{table_name}', sa.Column('{column_name}_new', {type_!r}))"
+                    f"\n  op.execute('UPDATE {table_name} SET {column_name}_new = {column_name}::{type_}')"
+                    f"\n  op.drop_column('{table_name}', '{column_name}')"
+                    f"\n  op.alter_column('{table_name}', '{column_name}_new', new_column_name='{column_name}')"
                 )
+                raise CommandError(error_msg)
 
             # Check for postgresql_using parameter (not supported in Redshift)
             if kw.get('postgresql_using'):
-                warnings.warn(
+                error_msg = (
                     "Redshift does not support USING clauses in ALTER COLUMN. "
-                    "The 'postgresql_using' parameter will be ignored.",
-                    UserWarning,
-                    stacklevel=3
+                    "The 'postgresql_using' parameter cannot be used with Redshift."
+                    "\n\nYou must manually perform the type conversion in your migration using UPDATE statements."
                 )
+                raise CommandError(error_msg)
 
             # Call parent implementation
             super(RedshiftImpl, self).alter_column(

@@ -2,7 +2,8 @@ from alembic.ddl.base import RenameTable, ColumnComment
 from alembic.ddl.postgresql import PostgresqlColumnType
 from alembic import migration
 from sqlalchemy import Integer, VARCHAR
-import warnings
+from sqlalchemy.exc import CompileError
+import pytest
 
 from sqlalchemy_redshift import dialect
 
@@ -37,21 +38,21 @@ def test_alter_column_type_varchar_supported(stub_redshift_dialect):
     assert sql == 'ALTER TABLE table_name ALTER COLUMN column_name TYPE VARCHAR(100)'
 
 
-def test_alter_column_type_unsupported_warns(stub_redshift_dialect):
-    """Test non-VARCHAR type change - unsupported by Redshift, should warn"""
+def test_alter_column_type_unsupported_raises(stub_redshift_dialect):
+    """Test non-VARCHAR type change - unsupported by Redshift, should raise exception"""
     compiler = dialect.RedshiftDDLCompiler(stub_redshift_dialect, None)
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        sql = compiler.process(
+    with pytest.raises(CompileError) as exc_info:
+        compiler.process(
             PostgresqlColumnType("table_name", "column_name", Integer())
         )
 
-        # Should generate a warning
-        assert len(w) == 1
-        assert "Redshift does not support ALTER COLUMN TYPE" in str(w[0].message)
-        assert "manual migration" in str(w[0].message)
-
-        # Should still generate SQL (for documentation purposes)
-        assert 'ALTER TABLE table_name' in sql
-        assert 'column_name' in sql
+    # Should raise with helpful error message
+    error_msg = str(exc_info.value)
+    assert "Redshift does not support ALTER COLUMN TYPE" in error_msg
+    assert "Only VARCHAR size changes are supported" in error_msg
+    assert "multi-step migration" in error_msg
+    assert "op.add_column" in error_msg
+    assert "op.execute" in error_msg
+    assert "op.drop_column" in error_msg
+    assert "op.alter_column" in error_msg
