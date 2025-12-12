@@ -65,13 +65,12 @@ else:
             - No arbitrary type changes (e.g., VARCHAR to INTEGER)
             - No USING clause support
 
-            For VARCHAR size changes only, we use the native Redshift syntax.
-            For other type changes, this will generate the SQL but it will
-            fail at runtime - users must handle type changes manually via:
-            1. ADD new column with new type
-            2. UPDATE to copy/cast data
-            3. DROP old column
-            4. RENAME new column to old name
+            For VARCHAR size changes without USING clauses, we generate valid
+            Redshift SQL. For all other operations, we raise a CompileError
+            immediately with detailed instructions for manual migration.
+
+            This fail-fast approach prevents invalid migrations from being
+            generated and provides clear guidance to developers.
             """
             from sqlalchemy.dialects.postgresql import VARCHAR
 
@@ -82,14 +81,14 @@ else:
             )
 
             if is_varchar_resize:
-                # Use Redshift's limited ALTER COLUMN TYPE syntax (VARCHAR size only)
+                # Generate valid Redshift ALTER COLUMN TYPE syntax (VARCHAR size changes only)
                 return "%s %s %s" % (
                     postgresql.alter_table(compiler, element.table_name, element.schema),
                     postgresql.alter_column(compiler, element.column_name),
                     "TYPE %s" % postgresql.format_type(compiler, element.type_),
                 )
             else:
-                # For non-VARCHAR type changes or USING clauses, raise an exception
+                # Fail fast with detailed migration instructions for unsupported operations
                 from sqlalchemy.exc import CompileError
 
                 error_msg = (
@@ -138,6 +137,10 @@ else:
             - Arbitrary type changes (e.g., INTEGER to VARCHAR)
             - USING clauses
             - Changing column defaults (use ADD DEFAULT/DROP DEFAULT separately)
+
+            This method raises CommandError immediately when unsupported
+            operations are attempted, providing detailed migration instructions
+            for manual workarounds.
             """
             from sqlalchemy.dialects.postgresql import VARCHAR
             from alembic.util import CommandError
