@@ -26,13 +26,11 @@ from sqlalchemy.sql import sqltypes
 from sqlalchemy.sql import and_ as sql_and
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql import cast as sql_cast
-from sqlalchemy.sql.elements import quoted_name
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlalchemy.types import (BIGINT, BOOLEAN, CHAR, DATE, DECIMAL, INTEGER,
                               REAL, SMALLINT, TIMESTAMP, VARCHAR as VARCHAR_TYPE, NullType)
-from sqlalchemy import util as sa_util
 
 from .commands import (AlterTableAppendCommand, Compression, CopyCommand,
                        CreateLibraryCommand, Encoding, Format,
@@ -1804,8 +1802,9 @@ class RedshiftDialect_redshift_connector(RedshiftDialectMixin, PGDialect):
             )
 
         def post_process_text(self, text):
+            from sqlalchemy import util
             if "%%" in text:
-                sa_util.warn(
+                util.warn(
                     "The SQLAlchemy postgresql dialect "
                     "now automatically escapes '%' in text() "
                     "expressions to '%%'."
@@ -1897,6 +1896,7 @@ class RedshiftDialect_redshift_connector(RedshiftDialectMixin, PGDialect):
         fns = []
 
         def on_connect(conn):
+            from sqlalchemy.sql.elements import quoted_name
             conn.py_types[quoted_name] = conn.py_types[str]
 
         fns.append(on_connect)
