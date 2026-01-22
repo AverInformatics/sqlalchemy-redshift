@@ -2,6 +2,7 @@ import importlib
 import json
 import re
 from collections import defaultdict, namedtuple
+from functools import lru_cache
 from logging import getLogger
 from typing import List
 
@@ -917,6 +918,7 @@ class RedshiftDialectMixin(DefaultDialect):
         # Use IN clause - Redshift supports this
         return pg_class_table.c.relkind.in_(relkinds)
 
+    @lru_cache()
     def _comment_query(self, schema, has_filter_names, scope, kind):
         """
         Build query for table comments.
