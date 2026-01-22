@@ -20,7 +20,6 @@ from sqlalchemy.dialects.postgresql.psycopg2cffi import PGDialect_psycopg2cffi
 from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.engine.reflection import ObjectScope, ObjectKind, ReflectionDefaults
-from sqlalchemy.exc import CompileError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import sqltypes
 from sqlalchemy.sql import and_ as sql_and
@@ -93,9 +92,9 @@ else:
                     "TYPE %s" % postgresql.format_type(compiler, element.type_),
                 )
             else:
+                # Fail fast with detailed migration instructions for unsupported operations
                 from sqlalchemy.exc import CompileError
 
-                # Fail fast with detailed migration instructions for unsupported operations
                 error_msg = (
                     f"Redshift does not support ALTER COLUMN TYPE for changing "
                     f"column '{element.column_name}' to {element.type_}."
