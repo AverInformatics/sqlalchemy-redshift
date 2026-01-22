@@ -21,10 +21,7 @@ from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.engine.reflection import ObjectScope, ObjectKind, ReflectionDefaults
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql import sqltypes
-from sqlalchemy.sql import and_ as sql_and
-from sqlalchemy.sql import bindparam
-from sqlalchemy.sql import cast as sql_cast
+from sqlalchemy.sql import (sqltypes, and_ as sql_and, bindparam, cast as sql_cast)
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
