@@ -963,33 +963,6 @@ class RedshiftDialectMixin(DefaultDialect):
             )
         return query
 
-    @reflection.cache
-    def get_table_comment(self, connection, table_name, schema=None, **kw):
-        """
-        Return the table comment for a single table.
-
-        Delegates to get_multi_table_comment following PostgreSQL pattern.
-        """
-        # Use get_multi_table_comment with a single table filter
-        data = dict(
-            self.get_multi_table_comment(
-                connection,
-                schema=schema,
-                filter_names=[table_name],
-                scope=ObjectScope.ANY if hasattr(ObjectScope, 'ANY') else None,
-                kind=ObjectKind.ANY if hasattr(ObjectKind, 'ANY') else None,
-                **kw,
-            )
-        )
-
-        # Extract the result for this specific table
-        key = (schema, table_name)
-        if key in data:
-            return data[key]
-        else:
-            # Return default empty comment
-            return ReflectionDefaults.table_comment()
-
     # Copied from SQLAlchemy 1.4.0
     # https://github.com/sqlalchemy/sqlalchemy/blob/rel_1_4_54/lib/sqlalchemy/dialects/postgresql/base.py#L4741-L4778
     def _load_domains(self, connection):
