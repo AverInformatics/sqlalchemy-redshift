@@ -2,15 +2,14 @@ import importlib
 import json
 import re
 from collections import defaultdict, namedtuple
-from functools import lru_cache
 from logging import getLogger
 from typing import List
 
 import importlib.resources
 import sqlalchemy as sa
 from packaging.version import Version
-from sqlalchemy import inspect, select
-from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM, REGCLASS
+from sqlalchemy import inspect
+from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM
 from sqlalchemy.dialects.postgresql.base import util
 from sqlalchemy.dialects.postgresql.base import (PGCompiler, PGDDLCompiler,
                                                  PGDialect, PGExecutionContext,
@@ -21,7 +20,7 @@ from sqlalchemy.dialects.postgresql.psycopg2cffi import PGDialect_psycopg2cffi
 from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql import (sqltypes, and_ as sql_and, bindparam, cast as sql_cast)
+from sqlalchemy.sql import sqltypes
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
@@ -917,40 +916,6 @@ class RedshiftDialectMixin(DefaultDialect):
 
         # Use IN clause - Redshift supports this
         return pg_class_table.c.relkind.in_(relkinds)
-
-    @lru_cache()
-    def _comment_query(self, schema, has_filter_names, scope, kind):
-        """
-        Build query for table comments.
-
-        Overrides PostgreSQL's implementation to use sql_cast instead of sql.func.cast
-        for Redshift compatibility.
-        """
-        relkinds = self._kind_to_relkinds(kind)
-        query = (
-            select(
-                pg_catalog.pg_class.c.relname,
-                pg_catalog.pg_description.c.description,
-            )
-            .select_from(pg_catalog.pg_class)
-            .outerjoin(
-                pg_catalog.pg_description,
-                sql_and(
-                    pg_catalog.pg_class.c.oid
-                    == pg_catalog.pg_description.c.objoid,
-                    pg_catalog.pg_description.c.objsubid == 0,
-                    pg_catalog.pg_description.c.classoid
-                    == sql_cast("pg_catalog.pg_class", REGCLASS),
-                ),
-            )
-            .where(self._pg_class_relkind_condition(relkinds))
-        )
-        query = self._pg_class_filter_scope_schema(query, schema, scope)
-        if has_filter_names:
-            query = query.where(
-                pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
-            )
-        return query
 
     # Copied from SQLAlchemy 1.4.0
     # https://github.com/sqlalchemy/sqlalchemy/blob/rel_1_4_54/lib/sqlalchemy/dialects/postgresql/base.py#L4741-L4778
