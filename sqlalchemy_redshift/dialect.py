@@ -929,24 +929,14 @@ class RedshiftDialectMixin(DefaultDialect):
         else:
             return False, {}
 
-    @reflection.cache
-    def get_multi_table_comment(self, connection, schema, filter_names, scope, kind, **kw):
+    def _comment_query(self, schema, has_filter_names, scope, kind):
         """
-        Return table comments for multiple tables.
+        Build query for table comments.
 
-        Overrides PostgreSQL's implementation to work with Redshift's limitations.
-        Uses pg_catalog module for proper table definitions without relpersistence.
+        Overrides PostgreSQL's implementation to use sql_cast instead of sql.func.cast
+        for Redshift compatibility.
         """
-        has_filter_names, params = self._prepare_filter_names(filter_names)
-
-        # Determine which relkinds to query based on kind
-        if kind is None or not hasattr(kind, '__contains__'):
-            # Default to all table-like objects
-            relkinds = pg_catalog.RELKINDS_ALL_TABLE_LIKE
-        else:
-            relkinds = pg_catalog.RELKINDS_ALL_TABLE_LIKE
-
-        # Build the query using pg_catalog tables
+        relkinds = self._kind_to_relkinds(kind)
         query = (
             select(
                 pg_catalog.pg_class.c.relname,
@@ -966,28 +956,12 @@ class RedshiftDialectMixin(DefaultDialect):
             )
             .where(self._pg_class_relkind_condition(relkinds))
         )
-
-        # Apply schema and scope filtering
         query = self._pg_class_filter_scope_schema(query, schema, scope)
-
-        # Apply table name filtering if provided
         if has_filter_names:
             query = query.where(
                 pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
             )
-
-        # Execute query
-        result = connection.execute(query, params)
-
-        # Return in the format expected by SQLAlchemy
-        default = ReflectionDefaults.table_comment
-        return (
-            (
-                (schema, table),
-                {"text": comment} if comment is not None else default(),
-            )
-            for table, comment in result
-        )
+        return query
 
     @reflection.cache
     def get_table_comment(self, connection, table_name, schema=None, **kw):
