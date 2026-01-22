@@ -934,12 +934,11 @@ class RedshiftDialectMixin(DefaultDialect):
             .outerjoin(
                 pg_catalog.pg_description,
                 sql_and(
-                    pg_catalog.pg_class.c.oid == pg_catalog.pg_description.c.objoid,
+                    pg_catalog.pg_class.c.oid
+                    == pg_catalog.pg_description.c.objoid,
                     pg_catalog.pg_description.c.objsubid == 0,
-                    pg_catalog.pg_description.c.classoid == sql_cast(
-                        'pg_catalog.pg_class',
-                        REGCLASS
-                    ),
+                    pg_catalog.pg_description.c.classoid
+                    == sql_cast("pg_catalog.pg_class", REGCLASS),
                 ),
             )
             .where(self._pg_class_relkind_condition(relkinds))
