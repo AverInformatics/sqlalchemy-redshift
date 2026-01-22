@@ -3,12 +3,13 @@ import json
 import re
 from collections import defaultdict, namedtuple
 from logging import getLogger
+from typing import List
 
 import importlib.resources
 import sqlalchemy as sa
 from packaging.version import Version
-from sqlalchemy import inspect
-from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM
+from sqlalchemy import inspect, select
+from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM, REGCLASS, VARCHAR
 from sqlalchemy.dialects.postgresql.base import util
 from sqlalchemy.dialects.postgresql.base import (PGCompiler, PGDDLCompiler,
                                                  PGDialect, PGExecutionContext,
@@ -18,21 +19,27 @@ from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.dialects.postgresql.psycopg2cffi import PGDialect_psycopg2cffi
 from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
+from sqlalchemy.engine.reflection import ObjectScope, ObjectKind, ReflectionDefaults
+from sqlalchemy.exc import CompileError
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql import sqltypes
+from sqlalchemy.sql import and_ as sql_and
+from sqlalchemy.sql import bindparam
+from sqlalchemy.sql import cast as sql_cast
+from sqlalchemy.sql.elements import quoted_name
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
-from sqlalchemy.sql import sqltypes
 from sqlalchemy.types import (BIGINT, BOOLEAN, CHAR, DATE, DECIMAL, INTEGER,
-                              REAL, SMALLINT, TIMESTAMP, VARCHAR, NullType)
+                              REAL, SMALLINT, TIMESTAMP, VARCHAR as VARCHAR_TYPE, NullType)
+from sqlalchemy import util as sa_util
 
 from .commands import (AlterTableAppendCommand, Compression, CopyCommand,
                        CreateLibraryCommand, Encoding, Format,
                        RefreshMaterializedView, UnloadFromSelect)
 from .ddl import (CreateMaterializedView, DropMaterializedView,
                   get_table_attributes)
-from typing import List
-from sqlalchemy.engine.reflection import ReflectionDefaults
+from . import pg_catalog
 
 sa_version = Version(sa.__version__)
 logger = getLogger(__name__)
@@ -72,8 +79,6 @@ else:
             This fail-fast approach prevents invalid migrations from being
             generated and provides clear guidance to developers.
             """
-            from sqlalchemy.dialects.postgresql import VARCHAR
-
             # Check if this is a VARCHAR-to-VARCHAR size change (supported by Redshift)
             is_varchar_resize = (
                 isinstance(element.type_, VARCHAR) and
@@ -89,8 +94,6 @@ else:
                 )
             else:
                 # Fail fast with detailed migration instructions for unsupported operations
-                from sqlalchemy.exc import CompileError
-
                 error_msg = (
                     f"Redshift does not support ALTER COLUMN TYPE for changing "
                     f"column '{element.column_name}' to {element.type_}."
@@ -870,6 +873,150 @@ class RedshiftDialectMixin(DefaultDialect):
 
     def get_temp_table_names(self, *args, **kwargs) -> List[str]:
         return []
+
+    def _pg_class_filter_scope_schema(
+        self, query, schema, scope=None, pg_class_table=None
+    ):
+        """
+        Filter pg_class query by schema and scope.
+
+        Redshift version that doesn't use relpersistence (not available in Redshift).
+        Similar to PostgreSQL's version but omits the relpersistence filtering.
+        """
+        if pg_class_table is None:
+            pg_class_table = pg_catalog.pg_class
+
+        query = query.join(
+            pg_catalog.pg_namespace,
+            pg_catalog.pg_namespace.c.oid == pg_class_table.c.relnamespace,
+        )
+
+        # Note: Redshift doesn't have relpersistence column, so we can't filter
+        # by temporary/persistent scope like PostgreSQL does.
+        # ObjectScope.TEMPORARY is not supported in Redshift via this column.
+
+        if schema is None:
+            # Use visible tables when no schema specified
+            query = query.where(pg_catalog.pg_table_is_visible(pg_class_table.c.oid))
+        else:
+            query = query.where(pg_catalog.pg_namespace.c.nspname == schema)
+
+        # Exclude system schemas
+        query = query.where(
+            ~pg_catalog.pg_namespace.c.nspname.like('pg_%')
+        )
+
+        return query
+
+    def _pg_class_relkind_condition(self, relkinds, pg_class_table=None):
+        """
+        Create condition for pg_class.relkind filtering.
+
+        Similar to PostgreSQL version but uses Redshift-compatible syntax.
+        """
+        if pg_class_table is None:
+            pg_class_table = pg_catalog.pg_class
+
+        # Use IN clause - Redshift supports this
+        return pg_class_table.c.relkind.in_(relkinds)
+
+    def _prepare_filter_names(self, filter_names):
+        """
+        Prepare filter names for binding.
+
+        Same as PostgreSQL implementation.
+        """
+        if filter_names:
+            return True, {"filter_names": filter_names}
+        else:
+            return False, {}
+
+    @reflection.cache
+    def get_multi_table_comment(self, connection, schema, filter_names, scope, kind, **kw):
+        """
+        Return table comments for multiple tables.
+
+        Overrides PostgreSQL's implementation to work with Redshift's limitations.
+        Uses pg_catalog module for proper table definitions without relpersistence.
+        """
+        has_filter_names, params = self._prepare_filter_names(filter_names)
+
+        # Determine which relkinds to query based on kind
+        if kind is None or not hasattr(kind, '__contains__'):
+            # Default to all table-like objects
+            relkinds = pg_catalog.RELKINDS_ALL_TABLE_LIKE
+        else:
+            relkinds = pg_catalog.RELKINDS_ALL_TABLE_LIKE
+
+        # Build the query using pg_catalog tables
+        query = (
+            select(
+                pg_catalog.pg_class.c.relname,
+                pg_catalog.pg_description.c.description,
+            )
+            .select_from(pg_catalog.pg_class)
+            .outerjoin(
+                pg_catalog.pg_description,
+                sql_and(
+                    pg_catalog.pg_class.c.oid == pg_catalog.pg_description.c.objoid,
+                    pg_catalog.pg_description.c.objsubid == 0,
+                    pg_catalog.pg_description.c.classoid == sql_cast(
+                        'pg_catalog.pg_class',
+                        REGCLASS
+                    ),
+                ),
+            )
+            .where(self._pg_class_relkind_condition(relkinds))
+        )
+
+        # Apply schema and scope filtering
+        query = self._pg_class_filter_scope_schema(query, schema, scope)
+
+        # Apply table name filtering if provided
+        if has_filter_names:
+            query = query.where(
+                pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
+            )
+
+        # Execute query
+        result = connection.execute(query, params)
+
+        # Return in the format expected by SQLAlchemy
+        default = ReflectionDefaults.table_comment
+        return (
+            (
+                (schema, table),
+                {"text": comment} if comment is not None else default(),
+            )
+            for table, comment in result
+        )
+
+    @reflection.cache
+    def get_table_comment(self, connection, table_name, schema=None, **kw):
+        """
+        Return the table comment for a single table.
+
+        Delegates to get_multi_table_comment following PostgreSQL pattern.
+        """
+        # Use get_multi_table_comment with a single table filter
+        data = dict(
+            self.get_multi_table_comment(
+                connection,
+                schema=schema,
+                filter_names=[table_name],
+                scope=ObjectScope.ANY if hasattr(ObjectScope, 'ANY') else None,
+                kind=ObjectKind.ANY if hasattr(ObjectKind, 'ANY') else None,
+                **kw,
+            )
+        )
+
+        # Extract the result for this specific table
+        key = (schema, table_name)
+        if key in data:
+            return data[key]
+        else:
+            # Return default empty comment
+            return ReflectionDefaults.table_comment()
 
     # Copied from SQLAlchemy 1.4.0
     # https://github.com/sqlalchemy/sqlalchemy/blob/rel_1_4_54/lib/sqlalchemy/dialects/postgresql/base.py#L4741-L4778
@@ -1658,9 +1805,8 @@ class RedshiftDialect_redshift_connector(RedshiftDialectMixin, PGDialect):
             )
 
         def post_process_text(self, text):
-            from sqlalchemy import util
             if "%%" in text:
-                util.warn(
+                sa_util.warn(
                     "The SQLAlchemy postgresql dialect "
                     "now automatically escapes '%' in text() "
                     "expressions to '%%'."
@@ -1752,7 +1898,6 @@ class RedshiftDialect_redshift_connector(RedshiftDialectMixin, PGDialect):
         fns = []
 
         def on_connect(conn):
-            from sqlalchemy.sql.elements import quoted_name
             conn.py_types[quoted_name] = conn.py_types[str]
 
         fns.append(on_connect)
