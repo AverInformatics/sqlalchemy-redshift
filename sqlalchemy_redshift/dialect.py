@@ -905,18 +905,6 @@ class RedshiftDialectMixin(DefaultDialect):
 
         return query
 
-    def _pg_class_relkind_condition(self, relkinds, pg_class_table=None):
-        """
-        Create condition for pg_class.relkind filtering.
-
-        Similar to PostgreSQL version but uses Redshift-compatible syntax.
-        """
-        if pg_class_table is None:
-            pg_class_table = pg_catalog.pg_class
-
-        # Use IN clause - Redshift supports this
-        return pg_class_table.c.relkind.in_(relkinds)
-
     # Copied from SQLAlchemy 1.4.0
     # https://github.com/sqlalchemy/sqlalchemy/blob/rel_1_4_54/lib/sqlalchemy/dialects/postgresql/base.py#L4741-L4778
     def _load_domains(self, connection):
