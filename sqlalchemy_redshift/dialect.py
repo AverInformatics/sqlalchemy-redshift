@@ -918,17 +918,6 @@ class RedshiftDialectMixin(DefaultDialect):
         # Use IN clause - Redshift supports this
         return pg_class_table.c.relkind.in_(relkinds)
 
-    def _prepare_filter_names(self, filter_names):
-        """
-        Prepare filter names for binding.
-
-        Same as PostgreSQL implementation.
-        """
-        if filter_names:
-            return True, {"filter_names": filter_names}
-        else:
-            return False, {}
-
     def _comment_query(self, schema, has_filter_names, scope, kind):
         """
         Build query for table comments.
