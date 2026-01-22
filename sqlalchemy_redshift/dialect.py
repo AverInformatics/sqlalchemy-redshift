@@ -882,7 +882,6 @@ class RedshiftDialectMixin(DefaultDialect):
         """
         if pg_class_table is None:
             pg_class_table = pg_catalog.pg_class
-
         query = query.join(
             pg_catalog.pg_namespace,
             pg_catalog.pg_namespace.c.oid == pg_class_table.c.relnamespace,
@@ -893,16 +892,13 @@ class RedshiftDialectMixin(DefaultDialect):
         # ObjectScope.TEMPORARY is not supported in Redshift via this column.
 
         if schema is None:
-            # Use visible tables when no schema specified
-            query = query.where(pg_catalog.pg_table_is_visible(pg_class_table.c.oid))
+            query = query.where(
+                pg_catalog.pg_table_is_visible(pg_class_table.c.oid),
+                # ignore pg_catalog schema
+                pg_catalog.pg_namespace.c.nspname != 'pg_catalog',
+            )
         else:
             query = query.where(pg_catalog.pg_namespace.c.nspname == schema)
-
-        # Exclude system schemas
-        query = query.where(
-            ~pg_catalog.pg_namespace.c.nspname.like('pg_%')
-        )
-
         return query
 
     # Copied from SQLAlchemy 1.4.0
