@@ -19,7 +19,6 @@ from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.dialects.postgresql.psycopg2cffi import PGDialect_psycopg2cffi
 from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
-from sqlalchemy.engine.reflection import ObjectScope, ObjectKind, ReflectionDefaults
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import (sqltypes, and_ as sql_and, bindparam, cast as sql_cast)
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
