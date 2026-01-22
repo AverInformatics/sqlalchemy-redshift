@@ -145,7 +145,6 @@ else:
             operations are attempted, providing detailed migration instructions
             for manual workarounds.
             """
-            from sqlalchemy.dialects.postgresql import VARCHAR
             from alembic.util import CommandError
 
             # Check if attempting unsupported type change
