@@ -9,7 +9,7 @@ import importlib.resources
 import sqlalchemy as sa
 from packaging.version import Version
 from sqlalchemy import inspect, select
-from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM, REGCLASS, VARCHAR
+from sqlalchemy.dialects.postgresql import DOMAIN, DOUBLE_PRECISION, ENUM, REGCLASS
 from sqlalchemy.dialects.postgresql.base import util
 from sqlalchemy.dialects.postgresql.base import (PGCompiler, PGDDLCompiler,
                                                  PGDialect, PGExecutionContext,
@@ -30,7 +30,7 @@ from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlalchemy.types import (BIGINT, BOOLEAN, CHAR, DATE, DECIMAL, INTEGER,
-                              REAL, SMALLINT, TIMESTAMP, VARCHAR as VARCHAR_TYPE, NullType)
+                              REAL, SMALLINT, TIMESTAMP, VARCHAR, NullType)
 
 from .commands import (AlterTableAppendCommand, Compression, CopyCommand,
                        CreateLibraryCommand, Encoding, Format,
@@ -77,6 +77,8 @@ else:
             This fail-fast approach prevents invalid migrations from being
             generated and provides clear guidance to developers.
             """
+            from sqlalchemy.dialects.postgresql import VARCHAR
+
             # Check if this is a VARCHAR-to-VARCHAR size change (supported by Redshift)
             is_varchar_resize = (
                 isinstance(element.type_, VARCHAR) and
@@ -91,6 +93,8 @@ else:
                     "TYPE %s" % postgresql.format_type(compiler, element.type_),
                 )
             else:
+                from sqlalchemy.exc import CompileError
+
                 # Fail fast with detailed migration instructions for unsupported operations
                 error_msg = (
                     f"Redshift does not support ALTER COLUMN TYPE for changing "
@@ -143,6 +147,7 @@ else:
             operations are attempted, providing detailed migration instructions
             for manual workarounds.
             """
+            from sqlalchemy.dialects.postgresql import VARCHAR
             from alembic.util import CommandError
 
             # Check if attempting unsupported type change
