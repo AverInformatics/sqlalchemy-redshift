@@ -34,6 +34,13 @@ from .ddl import (CreateMaterializedView, DropMaterializedView,
                   get_table_attributes)
 from . import pg_catalog
 
+# Patch PostgreSQL's base module to use Redshift's pg_catalog
+# This ensures that all inherited methods (like _comment_query) use
+# Redshift's table definitions instead of PostgreSQL's, preventing
+# duplicate table errors when table objects differ between dialects.
+import sqlalchemy.dialects.postgresql.base as pg_base
+pg_base.pg_catalog = pg_catalog
+
 sa_version = Version(sa.__version__)
 logger = getLogger(__name__)
 
@@ -853,6 +860,7 @@ class RedshiftDialectMixin(DefaultDialect):
             **super(RedshiftDialectMixin, self).ischema_names,
             **REDSHIFT_ISCHEMA_NAMES
         }
+
     def get_multi_indexes(self, connection, **kw):
         return self._default_multi_reflect(self.get_indexes, connection, **kw)
 
@@ -879,9 +887,13 @@ class RedshiftDialectMixin(DefaultDialect):
 
         Redshift version that doesn't use relpersistence (not available in Redshift).
         Similar to PostgreSQL's version but omits the relpersistence filtering.
+
+        Note: The pg_catalog module is patched at import time to use Redshift's
+        definitions, so all references to pg_catalog tables are consistent.
         """
         if pg_class_table is None:
             pg_class_table = pg_catalog.pg_class
+
         query = query.join(
             pg_catalog.pg_namespace,
             pg_catalog.pg_namespace.c.oid == pg_class_table.c.relnamespace,
