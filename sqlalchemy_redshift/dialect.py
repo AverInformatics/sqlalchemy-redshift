@@ -3,6 +3,7 @@ import json
 import re
 from collections import defaultdict, namedtuple
 from logging import getLogger
+from typing import List
 
 import importlib.resources
 import sqlalchemy as sa
@@ -19,10 +20,10 @@ from sqlalchemy.dialects.postgresql.psycopg2cffi import PGDialect_psycopg2cffi
 from sqlalchemy.engine import reflection
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql import sqltypes
 from sqlalchemy.sql.expression import (BinaryExpression, BooleanClauseList,
                                        Delete)
 from sqlalchemy.sql.type_api import TypeEngine
-from sqlalchemy.sql import sqltypes
 from sqlalchemy.types import (BIGINT, BOOLEAN, CHAR, DATE, DECIMAL, INTEGER,
                               REAL, SMALLINT, TIMESTAMP, VARCHAR, NullType)
 
@@ -31,8 +32,7 @@ from .commands import (AlterTableAppendCommand, Compression, CopyCommand,
                        RefreshMaterializedView, UnloadFromSelect)
 from .ddl import (CreateMaterializedView, DropMaterializedView,
                   get_table_attributes)
-from typing import List
-from sqlalchemy.engine.reflection import ReflectionDefaults
+from . import pg_catalog
 
 sa_version = Version(sa.__version__)
 logger = getLogger(__name__)
@@ -870,6 +870,36 @@ class RedshiftDialectMixin(DefaultDialect):
 
     def get_temp_table_names(self, *args, **kwargs) -> List[str]:
         return []
+
+    def _pg_class_filter_scope_schema(
+        self, query, schema, scope=None, pg_class_table=None
+    ):
+        """
+        Filter pg_class query by schema and scope.
+
+        Redshift version that doesn't use relpersistence (not available in Redshift).
+        Similar to PostgreSQL's version but omits the relpersistence filtering.
+        """
+        if pg_class_table is None:
+            pg_class_table = pg_catalog.pg_class
+        query = query.join(
+            pg_catalog.pg_namespace,
+            pg_catalog.pg_namespace.c.oid == pg_class_table.c.relnamespace,
+        )
+
+        # Note: Redshift doesn't have relpersistence column, so we can't filter
+        # by temporary/persistent scope like PostgreSQL does.
+        # ObjectScope.TEMPORARY is not supported in Redshift via this column.
+
+        if schema is None:
+            query = query.where(
+                pg_catalog.pg_table_is_visible(pg_class_table.c.oid),
+                # ignore pg_catalog schema
+                pg_catalog.pg_namespace.c.nspname != 'pg_catalog',
+            )
+        else:
+            query = query.where(pg_catalog.pg_namespace.c.nspname == schema)
+        return query
 
     # Copied from SQLAlchemy 1.4.0
     # https://github.com/sqlalchemy/sqlalchemy/blob/rel_1_4_54/lib/sqlalchemy/dialects/postgresql/base.py#L4741-L4778
